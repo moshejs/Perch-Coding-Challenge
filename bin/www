@@ -1,0 +1,133 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+const app = require('../app');
+const debug = require('debug')('cursortrace:server');
+const http = require('http');
+const WebSocket = require('ws');
+const fs = require('fs');
+
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+const port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+const server = http.createServer(app);
+/**
+ * Initialize WebSocket server instance.
+ */
+const wss = new WebSocket.Server({ server });
+const fileName = './logs/session.json'; // TODO: Separate sessions by UUID, date, etc.
+
+
+function writeToTextFile(dataToStore) {
+    fs.writeFile(fileName, JSON.stringify(dataToStore), 'utf-8', (err) => {
+        if (err) throw err;
+    })
+}
+
+wss.on('connection', (ws) => {
+
+    //connection is up, let's add a simple simple event
+    ws.on('message', (message) => {
+        //log the received message and send it back to the client
+        const msg = JSON.parse(message);
+        fs.readFile(fileName, 'utf-8', (err, data) => {
+            if (err) throw err;
+            const storageFile = JSON.parse(data);
+            if(msg.type === 'cursorLocation') {
+
+                storageFile.history.push(msg);
+                console.log(storageFile);
+                writeToTextFile(storageFile);
+
+                wss.clients.forEach(client => {
+                    if (client != ws) {
+                        client.send(message);
+                    }
+                });
+
+            } else if (msg.type === 'replay') {
+              const replayPayload = JSON.stringify({history: storageFile.history, type: 'replay'});
+              ws.send(replayPayload);
+            }
+        });
+    });
+});
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  const bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  const addr = server.address();
+  const bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
